@@ -32,20 +32,40 @@ jobs:
           elif [ -f cfst_linux_amd64/CloudflareST ]; then
             mv cfst_linux_amd64/CloudflareST ./cfst
           else
-            echo "Binary not found after extract:"
+            echo "Binary not found:"
             find . -maxdepth 3 -type f \( -name "cfst*" -o -name "CloudflareST*" \) 2>/dev/null || true
-            ls -la
             ls -la cfst_linux_amd64/ 2>/dev/null || true
             exit 1
           fi
-
           chmod +x cfst
+
+          # 必须带上 IP 段文件
+          if [ -f cfst_linux_amd64/ip.txt ]; then
+            cp cfst_linux_amd64/ip.txt ./ip.txt
+          elif [ -f ip.txt ]; then
+            true
+          else
+            echo "ip.txt missing, download Cloudflare IP ranges"
+            curl -s https://www.cloudflare.com/ips-v4 > ip.txt
+          fi
+
+          ls -la cfst ip.txt
           ./cfst -v || true
 
       - name: Run speed test
         run: |
           set -e
-          ./cfst -n 200 -t 4 -dn 40 -dt 8 -tl 300 -sl 5 -p 0 -o result.csv
+          echo "=== start speed test ==="
+          # 降低条件，避免 GitHub 机房测不到足够结果
+          # -tl 500  延迟上限放宽
+          # -sl 1    速度下限放宽到 1MB/s
+          # -dn 30   下载测速数量
+          ./cfst -n 200 -t 4 -dn 30 -dt 8 -tl 500 -sl 1 -p 0 -o result.csv -f ip.txt || {
+            echo "cfst exit code: $?"
+            ls -la
+            [ -f result.csv ] && head -n 20 result.csv || echo "no result.csv"
+            exit 1
+          }
 
           if [ ! -f result.csv ]; then
             echo "result.csv not created"
@@ -53,30 +73,6 @@ jobs:
           fi
           LINES=$(wc -l < result.csv)
           echo "result.csv lines: $LINES"
+          head -n 15 result.csv
+
           if [ "$LINES" -le 1 ]; then
-            echo "No valid results, skip update"
-            exit 0
-          fi
-
-          head -n 51 result.csv > CloudflareSpeedTest.csv
-          echo "Preview:"
-          head -n 10 CloudflareSpeedTest.csv
-
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          if [ ! -f CloudflareSpeedTest.csv ]; then
-            echo "No CSV to commit"
-            exit 0
-          fi
-
-          if git diff --quiet CloudflareSpeedTest.csv 2>/dev/null; then
-            echo "CSV unchanged, skip commit"
-            exit 0
-          fi
-
-          git add CloudflareSpeedTest.csv
-          git commit -m "chore: update CloudflareSpeedTest.csv $(date -u +%Y-%m-%d)"
-          git push
