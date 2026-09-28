@@ -8,7 +8,7 @@ on:
 jobs:
   sync_latest_from_upstream:
     name: Sync latest commits from upstream repo
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: ${{ github.event.repository.fork }}
     steps:
       # Step 1: run a standard checkout action
