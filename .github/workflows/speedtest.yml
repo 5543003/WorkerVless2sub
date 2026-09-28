@@ -1,0 +1,77 @@
+name: Cloudflare SpeedTest
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # 每天 UTC 02:00（北京时间 10:00）
+  workflow_dispatch: # 支持手动运行
+
+jobs:
+  speedtest:
+    name: Run CloudflareSpeedTest and update CSV
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download CloudflareSpeedTest
+        run: |
+          # 获取最新 release 的 linux_amd64 包
+          LATEST_URL=$(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest \
+            | grep "browser_download_url.*linux_amd64.tar.gz" \
+            | head -1 \
+            | cut -d '"' -f 4)
+          echo "Download: $LATEST_URL"
+          wget -q -O cfst.tar.gz "$LATEST_URL"
+          tar -xzf cfst.tar.gz
+          chmod +x cfst
+          # 确认可执行文件存在（新版本叫 cfst，旧版本可能叫 CloudflareST）
+          if [ ! -f cfst ]; then
+            if [ -f CloudflareST ]; then
+              mv CloudflareST cfst
+            else
+              echo "CloudflareSpeedTest binary not found"
+              ls -la
+              exit 1
+            fi
+          fi
+
+      - name: Run speed test
+        run: |
+          # 参数说明：
+          # -n 200   延迟测速线程
+          # -t 4     每个 IP 测 4 次
+          # -dn 40   下载测速数量（取延迟最低的前 40 个做下载测速）
+          # -dt 8    单个 IP 下载测速最长 8 秒
+          # -tl 300  平均延迟上限 300ms（可按需改）
+          # -sl 5    下载速度下限 5 MB/s（可按需改）
+          # -p 0     不打印到终端，只写文件
+          # -o       输出文件名
+          ./cfst -n 200 -t 4 -dn 40 -dt 8 -tl 300 -sl 5 -p 0 -o result.csv
+
+          # 检查是否有结果
+          if [ ! -f result.csv ] || [ $(wc -l < result.csv) -le 1 ]; then
+            echo "No valid speed test results, skip update"
+            exit 0
+          fi
+
+          # 只保留表头 + 前 50 条（按速度排序后的最优结果）
+          head -n 51 result.csv > CloudflareSpeedTest.csv
+          echo "Updated CloudflareSpeedTest.csv:"
+          head -n 10 CloudflareSpeedTest.csv
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet CloudflareSpeedTest.csv; then
+            echo "CSV unchanged, skip commit"
+            exit 0
+          fi
+
+          git add CloudflareSpeedTest.csv
+          git commit -m "chore: update CloudflareSpeedTest.csv $(date -u +%Y-%m-%d)"
+          git push
