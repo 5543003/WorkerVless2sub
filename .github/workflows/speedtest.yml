@@ -5,7 +5,7 @@ permissions:
 
 on:
   schedule:
-    - cron: "0 2 * * *" # 每天 UTC 02:00（北京时间 10:00）
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 jobs:
@@ -19,34 +19,32 @@ jobs:
       - name: Download CloudflareSpeedTest
         run: |
           set -e
-          # 官方 latest 直链，始终指向最新版
           wget -q -O cfst_linux_amd64.tar.gz \
             "https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_linux_amd64.tar.gz"
           tar -xzf cfst_linux_amd64.tar.gz
-          # 新版本可执行文件名为 cfst
-          if [ -f cfst ]; then
-            chmod +x cfst
+
+          if [ -f cfst_linux_amd64/cfst ]; then
+            mv cfst_linux_amd64/cfst ./cfst
+          elif [ -f cfst ]; then
+            true
           elif [ -f CloudflareST ]; then
             mv CloudflareST cfst
-            chmod +x cfst
+          elif [ -f cfst_linux_amd64/CloudflareST ]; then
+            mv cfst_linux_amd64/CloudflareST ./cfst
           else
             echo "Binary not found after extract:"
+            find . -maxdepth 3 -type f \( -name "cfst*" -o -name "CloudflareST*" \) 2>/dev/null || true
             ls -la
+            ls -la cfst_linux_amd64/ 2>/dev/null || true
             exit 1
           fi
+
+          chmod +x cfst
           ./cfst -v || true
 
       - name: Run speed test
         run: |
           set -e
-          # -n 200  线程
-          # -t 4    每个IP测4次
-          # -dn 40  下载测速数量
-          # -dt 8   下载测速时长(秒)
-          # -tl 300 延迟上限(ms)
-          # -sl 5   速度下限(MB/s)
-          # -p 0    不打印到终端
-          # -o      输出文件
           ./cfst -n 200 -t 4 -dn 40 -dt 8 -tl 300 -sl 5 -p 0 -o result.csv
 
           if [ ! -f result.csv ]; then
@@ -60,7 +58,6 @@ jobs:
             exit 0
           fi
 
-          # 表头 + 前50条
           head -n 51 result.csv > CloudflareSpeedTest.csv
           echo "Preview:"
           head -n 10 CloudflareSpeedTest.csv
